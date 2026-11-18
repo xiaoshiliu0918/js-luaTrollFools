@@ -26,6 +26,24 @@ jobs:
       - name: Make devkit executable
         run: chmod +x devkit/*.sh
 
+      # 脚本加载器 payload：工程里没有就去 PandoraLoader 的 Release 拉。
+      # 拉不到不影响构建（只是打出一个不含加载器的包），所以 continue-on-error。
+      # 私有仓库需要在仓库设置里加 PANDORA_TOKEN（有 repo 权限的 PAT）。
+      - name: Fetch PandoraLoader.dylib (optional)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.PANDORA_TOKEN || github.token }}
+        run: |
+          if [ -f TrollFools/PandoraLoader.dylib ]; then
+            echo "工程里已有 TrollFools/PandoraLoader.dylib，跳过拉取"
+            ls -l TrollFools/PandoraLoader.dylib
+            exit 0
+          fi
+          gh release download --repo xiaoshiliu0918/PandoraLoader \
+            --pattern 'PandoraLoader.dylib' --dir TrollFools --clobber \
+            && ls -l TrollFools/PandoraLoader.dylib \
+            || echo "没拉到加载器（仓库不存在 / 没发 release / 缺 PANDORA_TOKEN），本次包不含脚本加载器"
+
       - name: Build tipa
         run: |
           set -o pipefail
