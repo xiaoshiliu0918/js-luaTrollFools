@@ -78,8 +78,8 @@ fi
 
 # Write the control file
 cat > ../control << __EOF__
-Package: wiki.qaq.trollfools
-Name: TrollFools
+Package: com.shiliu.maxjs
+Name: js-luaTrollFools
 Version: $VERSION-$new_build_number
 Section: Applications
 Depends: firmware (>= 14.0)

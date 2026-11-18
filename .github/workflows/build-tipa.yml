@@ -26,17 +26,29 @@ jobs:
       - name: Make devkit executable
         run: chmod +x devkit/*.sh
 
-      # 脚本加载器 payload：工程里没有就去 PandoraLoader 的 Release 拉。
-      # 拉不到不影响构建（只是打出一个不含加载器的包），所以 continue-on-error。
-      # 私有仓库需要在仓库设置里加 PANDORA_TOKEN（有 repo 权限的 PAT）。
+      # 脚本加载器：先用 PandoraLoader/ 里的源码编一份。
+      # 这个仓库自包含，不需要另外的仓库或手动拷 dylib。
+      - name: Build PandoraLoader.dylib
+        run: |
+          if [ -f TrollFools/PandoraLoader.dylib ]; then
+            echo "工程里已有 TrollFools/PandoraLoader.dylib，跳过编译"
+            ls -l TrollFools/PandoraLoader.dylib
+            exit 0
+          fi
+          chmod +x PandoraLoader/build.sh
+          ( cd PandoraLoader && ./build.sh )
+          cp PandoraLoader/build/Payload/Pandora.app/PandoraLoader.dylib TrollFools/PandoraLoader.dylib
+          ls -l TrollFools/PandoraLoader.dylib
+
+      # 兜底：源码编译失败/跳过时，从 PandoraLoader 的 Release 拉现成的。
+      # 拉不到不影响构建，只是打出一个不含加载器的包。
       - name: Fetch PandoraLoader.dylib (optional)
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.PANDORA_TOKEN || github.token }}
         run: |
           if [ -f TrollFools/PandoraLoader.dylib ]; then
-            echo "工程里已有 TrollFools/PandoraLoader.dylib，跳过拉取"
-            ls -l TrollFools/PandoraLoader.dylib
+            echo "已有 TrollFools/PandoraLoader.dylib，跳过拉取"
             exit 0
           fi
           gh release download --repo xiaoshiliu0918/PandoraLoader \
@@ -55,14 +67,14 @@ jobs:
         run: |
           VERSION=$(awk -F "=" '/^VERSION/ {print $2}' TrollFools/Version.xcconfig | tr -d '[:space:]')
           BUILD=$(awk -F "=" '/^BUILD_NUMBER/ {print $2}' TrollFools/Version.xcconfig | tr -d '[:space:]')
-          echo "NAME=SLTrollFools-${VERSION}-${BUILD}" >> $GITHUB_ENV
+          echo "NAME=js-luaTrollFools-${VERSION}-${BUILD}" >> $GITHUB_ENV
           echo "TAG=v${VERSION}-b${BUILD}" >> $GITHUB_ENV
           mkdir -p out
           ls -la packages
           TIPA=$(find packages -maxdepth 1 -name '*.tipa' | head -1)
           test -n "$TIPA" || { echo "no tipa produced"; exit 1; }
-          cp "$TIPA" "out/SLTrollFools-${VERSION}-${BUILD}.tipa"
-          unzip -l "out/SLTrollFools-${VERSION}-${BUILD}.tipa" | head -30
+          cp "$TIPA" "out/js-luaTrollFools-${VERSION}-${BUILD}.tipa"
+          unzip -l "out/js-luaTrollFools-${VERSION}-${BUILD}.tipa" | head -30
 
       - name: Upload tipa
         if: success()
@@ -79,7 +91,7 @@ jobs:
           tag_name: ${{ env.TAG }}
           name: ${{ env.NAME }}
           body: |
-            SLTrollFools 自动构建产物。
+            js-luaTrollFools 自动构建产物。
 
             - 画面：液态磨砂玻璃（柔光壁纸底 + 独立磨砂卡），深色 / 浅色双主题
             - 动效：HGhubX 弹性曲线

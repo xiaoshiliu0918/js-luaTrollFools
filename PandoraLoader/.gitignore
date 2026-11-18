@@ -1,0 +1,12 @@
+build/
+*.tipa
+*.deb
+.DS_Store
+
+# Lua 源码不入库（需要时自己 clone）
+third_party/lua/
+
+# Xcode / theos 产物
+*.o
+*.dSYM/
+.theos/

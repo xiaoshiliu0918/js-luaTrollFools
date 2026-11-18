@@ -31,3 +31,7 @@ DerivedData/
 # 脚本加载器 payload：由 PandoraLoader 工程编译产出，不进库。
 # 放进去之后 devkit/tipa.sh 会自动打进 Payload/TrollFools.app/。
 TrollFools/PandoraLoader.dylib
+
+# PandoraLoader 构建产物（由 CI 或本地 build.sh 生成）
+PandoraLoader/build/
+PandoraLoader/Pandora.tipa

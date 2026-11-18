@@ -1,6 +1,9 @@
-# SLTrollFools
+# js-luaTrollFools
 
-基于 [TrollFools](https://github.com/Lessica/TrollFools) 的个人定制分支（石榴动态注入）。
+基于 [TrollFools](https://github.com/Lessica/TrollFools) 的个人定制分支（石榴动态注入），
+加了一层**脚本加载器**：注入 dylib 的同时把 js / lua 部署进目标 App 沙盒，一个包搞定。
+
+Bundle ID：`com.shiliu.MaxJS`（和 `com.shiliu.Max` 那版可以共存）。
 
 - **画面**：液态磨砂玻璃（柔光壁纸底 + 独立磨砂卡 / 半透提亮 + 雾层 + 顶棱高光），深色与浅色两套主题
 - **动效**：HGhubX 弹性体系（主弹簧 `response .42 / damping .62`、按下 0.965、逐条上浮入场）
@@ -36,9 +39,9 @@
 
 ## 下载
 
-在 [Releases](../../releases) 下载 `SLTrollFools-*.tipa`，用 TrollStore 直接安装。
+在 [Releases](../../releases) 下载 `js-luaTrollFools-*.tipa`，用 TrollStore 直接安装。
 
-也可以从 Actions 的构建产物 `SLTrollFools-x.y-z` 里取。
+也可以从 Actions 的构建产物 `js-luaTrollFools-x.y-z` 里取。
 
 ## 构建
 
@@ -48,7 +51,7 @@
 make package FINALPACKAGE=1
 ```
 
-产物落在 `packages/*.tipa`（Theos 输出的中文名会被工作流复制并重命名为 `SLTrollFools-<版本>-<构建号>.tipa`）。
+产物落在 `packages/*.tipa`（Theos 输出的中文名会被工作流复制并重命名为 `js-luaTrollFools-<版本>-<构建号>.tipa`）。
 
 ## 目录
 

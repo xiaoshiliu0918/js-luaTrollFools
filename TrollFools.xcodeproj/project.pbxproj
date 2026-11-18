@@ -960,7 +960,7 @@
 					"$(PROJECT_DIR)/TrollFools",
 				);
 				MARKETING_VERSION = $DEBUG_VERSION;
-				PRODUCT_BUNDLE_IDENTIFIER = com.shiliu.Max;
+				PRODUCT_BUNDLE_IDENTIFIER = com.shiliu.MaxJS;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -1009,7 +1009,7 @@
 					"$(PROJECT_DIR)/TrollFools",
 				);
 				MARKETING_VERSION = $VERSION;
-				PRODUCT_BUNDLE_IDENTIFIER = com.shiliu.Max;
+				PRODUCT_BUNDLE_IDENTIFIER = com.shiliu.MaxJS;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
