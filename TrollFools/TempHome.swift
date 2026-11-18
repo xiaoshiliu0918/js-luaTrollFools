@@ -1680,8 +1680,26 @@ struct TempHomeView: View {
         }
         .onOpenURL { url in
             // Receive files shared in from Files app / WeChat "open in" etc.
-            ImportEngine.shared.log("📩 收到共享文件：\(url.lastPathComponent)")
-            ImportEngine.shared.importURLs([url], source: "共享")
+            // 脚本（js/pjs/lua）进脚本库，其余照旧进暂存箱 —— 微信里「用其他
+            // 应用打开」是脚本最顺的入口：文件选择器对 .pjs 这类自定义扩展
+            // 在 iOS 15 上会被灰掉，而「打开方式」不挑扩展名。
+            let ext = url.pathExtension.lowercased()
+            if ["js", "lua", "pjs"].contains(ext) {
+                let report = PandoraScriptStore.shared.importScripts(from: [url])
+                if !report.imported.isEmpty {
+                    ImportEngine.shared.log("📜 脚本已入库：\(report.imported.joined(separator: ", "))")
+                    ImportEngine.shared.notice = TempAlertItem(
+                        title: "脚本已入库",
+                        message: report.imported.joined(separator: "\n") + "\n\n到「注入」页勾选它。"
+                    )
+                }
+                for line in report.skipped {
+                    ImportEngine.shared.log("⏭ 脚本跳过：\(line)")
+                }
+            } else {
+                ImportEngine.shared.log("📩 收到共享文件：\(url.lastPathComponent)")
+                ImportEngine.shared.importURLs([url], source: "共享")
+            }
         }
         .alert(item: $engine.notice) { item in
             Alert(title: Text(item.title), message: Text(item.message), dismissButton: .default(Text("好")))
@@ -2148,12 +2166,10 @@ struct TempHomeView: View {
                 }
                 .fileImporter(
                     isPresented: $isScriptImporterPresented,
-                    allowedContentTypes: [
-                        .init(filenameExtension: "js")!,
-                        .init(filenameExtension: "pjs")!,
-                        .init(filenameExtension: "lua")!,
-                        .plainText,
-                    ],
+                    // 放开成「任意文件」：UTType(filenameExtension:) 对 .pjs 这类
+                    // 自定义扩展在 iOS 15 上可能拿不到可匹配的类型，文件会被灰掉。
+                    // 选择器不拦，importScripts 里按扩展名过滤，体验反而更好。
+                    allowedContentTypes: [.data],
                     allowsMultipleSelection: true
                 ) { result in
                     switch result {
