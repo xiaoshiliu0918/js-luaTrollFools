@@ -68,6 +68,28 @@ xcrun -sdk iphoneos clang++ "${ARCH_FLAGS[@]}" -miphoneos-version-min=$MIN_IOS \
       -framework Foundation -framework UIKit \
       -framework JavaScriptCore -framework QuartzCore
 
+# ------------------------------------------------------------------ payload-only 模式
+# SLTrollFools 那边的构建只需要 PandoraLoader.dylib —— 容器 App 和注入器
+# （task_for_pid + 远程 dlopen）在 SLTrollFools 里已经有等价物，而且
+# inject/remote.c 与 app/PDTargets.m 依赖 iOS 公开 SDK 没有的 libproc.h 和
+# mach_vm.h（后者在 iOS SDK 里直接 #error）。--payload-only 就是为这种情况设的。
+# 注意必须放在容器 App 编译之前，否则那两个 fatal error 照样把构建打断。
+if [ "$1" = "--payload-only" ]; then
+    LDID="$(command -v ldid || true)"
+    if [ -z "$LDID" ] && [ -x "${THEOS:-/opt/theos}/bin/ldid" ]; then
+        LDID="${THEOS:-/opt/theos}/bin/ldid"
+    fi
+    if [ -n "$LDID" ]; then
+        echo "==> 签名（ldid，仅 dylib）"
+        "$LDID" -S "$APP/PandoraLoader.dylib"
+    else
+        echo "!! 没找到 ldid，跳过签名（SLTrollFools 注入时会用 ct_bypass 重签，不影响）"
+    fi
+    echo "==> --payload-only：跳过容器 App / 注入器 / 打包"
+    echo "完成：$APP/PandoraLoader.dylib"
+    exit 0
+fi
+
 # ------------------------------------------------------------------ 容器 App
 echo "==> 编译容器 App"
 xcrun -sdk iphoneos clang "${ARCH_FLAGS[@]}" -miphoneos-version-min=$MIN_IOS \
@@ -111,17 +133,6 @@ if [ -n "$LDID" ]; then
 else
     echo "!! 没找到 ldid，跳过签名。"
     echo "   brew install ldid  然后重跑；否则 TrollStore 装不上。"
-fi
-
-# ------------------------------------------------------------------ payload-only 模式
-# SLTrollFools 那边的构建只需要 PandoraLoader.dylib —— 容器 App 和注入器
-# （task_for_pid + 远程 dlopen）在 SLTrollFools 里已经有等价物，而且
-# inject/remote.c 与 app/PDTargets.m 依赖 iOS 公开 SDK 没有的 libproc.h 和
-# mach_vm.h（后者在 iOS SDK 里直接 #error）。--payload-only 就是为这种情况设的。
-if [ "$1" = "--payload-only" ]; then
-    echo "==> --payload-only：跳过容器 App / 注入器 / 打包"
-    echo "完成：$APP/PandoraLoader.dylib"
-    exit 0
 fi
 
 # ------------------------------------------------------------------ 打包
