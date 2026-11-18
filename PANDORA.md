@@ -34,8 +34,23 @@
 然后：
 
 ```bash
-cp PandoraLoader.dylib  SLTrollFools/TrollFools/
+unzip -o Pandora.tipa 'Payload/Pandora.app/PandoraLoader.dylib' -d /tmp/pd
+cp /tmp/pd/Payload/Pandora.app/PandoraLoader.dylib  SLTrollFools/TrollFools/
 ```
+
+**也可以完全不用手动拷**：`.github/workflows/build-tipa.yml` 里加了一步
+`Fetch PandoraLoader.dylib (optional)` —— 工程里没有这个文件时，会从
+`xiaoshiliu0918/PandoraLoader` 的最新 Release 按名字拉 `PandoraLoader.dylib`。
+
+要让这一步生效，需要：
+
+1. `E:\桌面\PandoraLoader` 推到 `xiaoshiliu0918/PandoraLoader`（私有库也行）；
+2. 给它打个 tag（`git tag v1 && git push --tags`），那边的 workflow 会把
+   `Pandora.tipa` 和 `PandoraLoader.dylib` 一起发到 Release；
+3. 如果那个库是私有的，在 SLTrollFools 的仓库设置里加 secret `PANDORA_TOKEN`
+   （有 `repo` 权限的 PAT）—— 默认的 `GITHUB_TOKEN` 跨仓库读不到私有内容。
+
+拉不到不会让构建失败，只是打出一个不含加载器的包（注入页会显示「缺少 PandoraLoader.dylib」）。
 
 `devkit/tipa.sh` 会检测到这个文件并把它拷进 `Payload/TrollFools.app/`：
 
