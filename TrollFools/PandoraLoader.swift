@@ -376,7 +376,7 @@ enum PandoraLoader {
         for dir in dirs {
             let meta = dir.appendingPathComponent(".com.apple.mobile_container_manager.metadata.plist")
             guard let data = try? Data(contentsOf: meta),
-                  let plist = try? PropertyListSerialization.propertyList(from: data, options: 0, format: nil),
+                  let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
                   let dict = plist as? [String: Any],
                   let ident = dict["MCMMetadataIdentifier"] as? String,
                   ident == bid
