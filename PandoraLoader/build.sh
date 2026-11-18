@@ -53,7 +53,7 @@ fi
 # ------------------------------------------------------------------ payload
 echo "==> 编译 PandoraLoader.dylib"
 xcrun -sdk iphoneos clang++ "${ARCH_FLAGS[@]}" -miphoneos-version-min=$MIN_IOS \
-      -fobjc-arc -O2 -std=c++17 \
+      -fobjc-arc -O2 \
       -dynamiclib -install_name /usr/lib/PandoraLoader.dylib \
       -Ipayload -Icommon $LUA_CFLAGS \
       -o "$APP/PandoraLoader.dylib" \

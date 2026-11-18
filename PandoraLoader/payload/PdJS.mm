@@ -69,8 +69,13 @@ static bool pd_js_limit_hit(void *ctxPtr) {
         PdLog(@"[js] %@", [v toString]);
     };
 
+    /* block 会被 js 自己持有，里面再强捕获 js 就是环（JSContext 永不释放）。
+       取一份 __weak，脚本每次读 Native.info 时再还原。 */
+    __weak JSContext *weakJS = js;
     js[@"__pd_info"] = ^JSValue *{
-        JSValue *o = [JSValue valueWithNewObjectInContext:js];
+        JSContext *ctx = weakJS;
+        if (!ctx) return nil;
+        JSValue *o = [JSValue valueWithNewObjectInContext:ctx];
         o[@"bid"]  = [[NSBundle mainBundle] bundleIdentifier] ?: @"";
         o[@"pid"]  = @(getpid());
         o[@"root"] = PdRootDir();
