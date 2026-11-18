@@ -36,7 +36,7 @@ jobs:
             exit 0
           fi
           chmod +x PandoraLoader/build.sh
-          ( cd PandoraLoader && ./build.sh )
+          ( cd PandoraLoader && ./build.sh --payload-only )
           cp PandoraLoader/build/Payload/Pandora.app/PandoraLoader.dylib TrollFools/PandoraLoader.dylib
           ls -l TrollFools/PandoraLoader.dylib
 

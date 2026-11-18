@@ -104,11 +104,24 @@ fi
 
 if [ -n "$LDID" ]; then
     echo "==> 签名（ldid）"
-    "$LDID" -Sapp/entitlements.plist "$APP/Pandora"
+    if [ -f "$APP/Pandora" ]; then
+        "$LDID" -Sapp/entitlements.plist "$APP/Pandora"
+    fi
     "$LDID" -S "$APP/PandoraLoader.dylib"
 else
     echo "!! 没找到 ldid，跳过签名。"
     echo "   brew install ldid  然后重跑；否则 TrollStore 装不上。"
+fi
+
+# ------------------------------------------------------------------ payload-only 模式
+# SLTrollFools 那边的构建只需要 PandoraLoader.dylib —— 容器 App 和注入器
+# （task_for_pid + 远程 dlopen）在 SLTrollFools 里已经有等价物，而且
+# inject/remote.c 与 app/PDTargets.m 依赖 iOS 公开 SDK 没有的 libproc.h 和
+# mach_vm.h（后者在 iOS SDK 里直接 #error）。--payload-only 就是为这种情况设的。
+if [ "$1" = "--payload-only" ]; then
+    echo "==> --payload-only：跳过容器 App / 注入器 / 打包"
+    echo "完成：$APP/PandoraLoader.dylib"
+    exit 0
 fi
 
 # ------------------------------------------------------------------ 打包
