@@ -923,7 +923,15 @@ final class GameInjector: ObservableObject {
     ///   - bid: 目标 App 的 bundle identifier。
     ///   - bundleURL: 目标 App 的 bundle URL。
     ///   - plugins: 要注入的插件文件列表。
-    func injectAndLaunch(appName: String, bid: String, bundleURL: URL, plugins: [URL]) {
+    ///   - scriptNames: 要一并部署的脚本名（PandoraScriptStore 里的文件名）。
+    ///     非空时会自动追加 PandoraLoader.dylib，并把脚本写进目标沙盒。
+    func injectAndLaunch(
+        appName: String,
+        bid: String,
+        bundleURL: URL,
+        plugins: [URL],
+        scriptNames: [String]? = nil
+    ) {
         guard !isWorking else { return }
         isWorking = true
         statusText = "正在处理…"
@@ -933,11 +941,57 @@ final class GameInjector: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
 
-            let names = plugins.map { $0.lastPathComponent }.joined(separator: ", ")
             engine.log("🩺 目标 App：\(bid)")
-            engine.log("💉 注入 \(plugins.count) 个插件：\(names)…")
+            var assets = plugins
 
-            DispatchQueue.main.async { self.statusText = "正在加载 \(plugins.count) 个插件…" }
+            // 0. 脚本先落盘。
+            // 注入完成会立刻跳转启动游戏，脚本晚一步就没意义了（加载器启动时就读一次）。
+            if let scriptNames, !scriptNames.isEmpty {
+                let store = PandoraScriptStore.shared
+                let picked = store.allScripts().filter { scriptNames.contains($0.name) }
+
+                if picked.isEmpty {
+                    engine.log("⚠️ 选中的脚本都不在脚本库里了，本次只注入插件")
+                } else {
+                    guard let container = PandoraLoader.dataContainerURL(bid: bid) else {
+                        engine.log("❌ 拿不到目标数据容器")
+                        self.finish(alertOnly: "拿不到 \(appName) 的数据容器。\n\n请先手动启动一次这个 App（系统才会给它建容器），再回来部署。")
+                        return
+                    }
+
+                    do {
+                        let count = try PandoraLoader.stageScripts(picked, dataContainer: container)
+                        let list = picked.map { "\($0.name) · \($0.lang)" }.joined(separator: ", ")
+                        engine.log("📜 已写入 \(count) 个脚本：\(list)")
+                        engine.log("   → \(container.path)/Documents/Pandora/scripts")
+                    } catch {
+                        engine.log("❌ 写脚本失败：\(error.localizedDescription)")
+                        self.finish(alertOnly: "脚本写入失败：\(error.localizedDescription)")
+                        return
+                    }
+
+                    guard let payload = PandoraLoader.payloadURL() else {
+                        engine.log("❌ 包里没有 \(PandoraLoader.dylibName)")
+                        self.finish(alertOnly: "包里没有 \(PandoraLoader.dylibName)。\n\n把编译好的加载器放到工程的 TrollFools/ 目录后重新打包；或者先把 dylib 丢进暂存箱。")
+                        return
+                    }
+                    if !assets.contains(where: { $0.lastPathComponent == PandoraLoader.dylibName }) {
+                        assets.append(payload)
+                        engine.log("🧩 已附加 \(PandoraLoader.dylibName)")
+                    }
+                }
+            }
+
+            guard !assets.isEmpty else {
+                engine.log("❌ 没有要注入的东西")
+                self.finish(alertOnly: "没有要注入的插件，也没有选脚本。")
+                return
+            }
+
+            let names = assets.map { $0.lastPathComponent }.joined(separator: ", ")
+            engine.log("💉 注入 \(assets.count) 个文件：\(names)…")
+
+            DispatchQueue.main.async { self.statusText = "正在加载 \(assets.count) 个文件…" }
 
             // 1. kill the app if running (inject requires it not running)
             killRunningApp(bid: bid)
@@ -946,14 +1000,14 @@ final class GameInjector: ObservableObject {
             // 2. inject (non-persistent)
             do {
                 let injector = try InjectorV3(bundleURL, loggerType: .os)
-                try injector.inject(plugins, shouldPersist: false)
+                try injector.inject(assets, shouldPersist: false)
                 engine.log("✅ 注入完成")
 
                 // 3. record session + spawn detached watchdog
                 let manager = TempInjectManager.shared
                 // 状态先落盘（决定下次启动能否自愈，写失败必须整体失败）；
                 // 看门狗只是“退出即还原”的快路径，起不来不该把成功报成失败。
-                try manager.writeState(bid: bid, assetURLs: plugins)
+                try manager.writeState(bid: bid, assetURLs: assets)
                 do {
                     try manager.spawnWatchdog(bid: bid)
                     engine.log("🐕 看门狗已启动（退出后自动还原）")
@@ -1803,6 +1857,11 @@ struct TempHomeView: View {
         @State private var selected: Set<String> = []
         @State private var pendingSessions: [TempInjectManager.PendingSession] = []
 
+        // 脚本加载器
+        @StateObject private var scriptModel = PandoraScriptModel()
+        @State private var isScriptImporterPresented = false
+        @State private var editorTarget: PandoraEditorTarget?
+
         var body: some View {
             // 同「应用」页：去掉 NavigationView，避免多页导航栏叠加与分页手势冲突
             ScrollView {
@@ -1985,6 +2044,10 @@ struct TempHomeView: View {
                                 }
                             }
 
+                            // 脚本加载器（可选）
+                            GlassSectionTitle(text: "脚本（可选）")
+                            scriptSection
+
                             // 注入按钮
                             Button {
                                 startInjection()
@@ -2073,10 +2136,49 @@ struct TempHomeView: View {
                 .onAppear {
                     reloadPlugins()
                     reloadPending()
+                    scriptModel.reload(bid: targetSelection.selectedApp?.bid)
                 }
                 .onChange(of: engine.logRevision) { _ in
                     // 看门狗起失败 / 还原失败都会写日志，这里顺带刷新待还原列表
                     reloadPending()
+                }
+                .onChange(of: targetSelection.selectedApp?.bid) { bid in
+                    // 换了目标 App，脚本选中状态跟着换（绑定是按 bundle id 存的）
+                    scriptModel.reload(bid: bid)
+                }
+                .fileImporter(
+                    isPresented: $isScriptImporterPresented,
+                    allowedContentTypes: [
+                        .init(filenameExtension: "js")!,
+                        .init(filenameExtension: "pjs")!,
+                        .init(filenameExtension: "lua")!,
+                        .plainText,
+                    ],
+                    allowsMultipleSelection: true
+                ) { result in
+                    switch result {
+                    case let .success(urls):
+                        let report = PandoraScriptStore.shared.importScripts(from: urls)
+                        for name in report.imported {
+                            engine.log("📥 导入脚本：\(name)")
+                        }
+                        for line in report.skipped {
+                            engine.log("⏭ 跳过：\(line)")
+                        }
+                        scriptModel.reload(bid: targetSelection.selectedApp?.bid)
+                        if !report.isEmpty {
+                            engine.notice = TempAlertItem(
+                                title: "脚本导入",
+                                message: "新增 / 更新 \(report.imported.count) 个"
+                                    + (report.skipped.isEmpty ? "" : "\n跳过 \(report.skipped.count) 个")
+                            )
+                        }
+                    case let .failure(error):
+                        engine.log("❌ 选择文件失败：\(error.localizedDescription)")
+                    }
+                }
+                .sheet(item: $editorTarget) { target in
+                    PandoraEditorView(name: target.name)
                 }
         }
 
@@ -2135,7 +2237,9 @@ struct TempHomeView: View {
         }
 
         private var canInject: Bool {
-            targetSelection.selectedApp != nil && !selected.isEmpty && !injector.isWorking
+            guard targetSelection.selectedApp != nil, !injector.isWorking else { return false }
+            // 只跑脚本、不注入别的插件也允许
+            return !selected.isEmpty || !scriptModel.selected.isEmpty
         }
 
         /// 注入按钮标题：根据当前状态动态变化。
@@ -2146,25 +2250,178 @@ struct TempHomeView: View {
             if targetSelection.selectedApp == nil {
                 return "请先选择目标应用"
             }
-            if selected.isEmpty {
-                return "请选择要注入的插件"
+            if selected.isEmpty && scriptModel.selected.isEmpty {
+                return "请选择插件或脚本"
             }
-            return selected.count == 1 ? "注入并启动（1 个插件）" : "注入并启动（\(selected.count) 个插件）"
+            var parts: [String] = []
+            if !selected.isEmpty { parts.append("\(selected.count) 个插件") }
+            if !scriptModel.selected.isEmpty { parts.append("\(scriptModel.selected.count) 个脚本") }
+            return "注入并启动（\(parts.joined(separator: " + "))）"
         }
 
         private func startInjection() {
             guard let app = targetSelection.selectedApp else { return }
             let urls = plugins.filter { selected.contains($0.absoluteString) }
-            guard !urls.isEmpty else { return }
+            let scripts = scriptModel.scripts
+                .filter { scriptModel.selected.contains($0.name) }
+                .map { $0.name }
+
+            guard !urls.isEmpty || !scripts.isEmpty else { return }
+
             let engine = ImportEngine.shared
-            engine.log("⚡️ 临时注入：\(app.name) ← \(urls.count) 个插件")
-            engine.log("   - \(urls.map { $0.lastPathComponent }.joined(separator: "\n   - "))")
+            engine.log("⚡️ 临时注入：\(app.name) ← \(urls.count) 个插件 / \(scripts.count) 个脚本")
+            if !urls.isEmpty {
+                engine.log("   - \(urls.map { $0.lastPathComponent }.joined(separator: "\n   - "))")
+            }
+            if !scripts.isEmpty {
+                engine.log("   * \(scripts.joined(separator: "\n   * "))")
+            }
+
             injector.injectAndLaunch(
                 appName: app.name,
                 bid: app.bid,
                 bundleURL: app.url,
-                plugins: urls
+                plugins: urls,
+                scriptNames: scripts
             )
+        }
+
+        // MARK: - 脚本区块
+
+        @ViewBuilder
+        private var scriptSection: some View {
+            VStack(spacing: 9) {
+                // 加载器状态 + 导入入口
+                HStack(spacing: 11) {
+                    Image(systemName: PandoraLoader.isAvailable ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                        .font(.system(size: 18))
+                        .foregroundColor(PandoraLoader.isAvailable ? .green : .orange)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(PandoraLoader.isAvailable ? "加载器已就绪" : "缺少 PandoraLoader.dylib")
+                            .font(.footnote)
+                            .fontWeight(.medium)
+                            .foregroundColor(.primary)
+                        Text(PandoraLoader.isAvailable
+                             ? "勾了脚本就自动带上加载器，不用另外选插件"
+                             : "把 dylib 放进工程 TrollFools/ 重新打包，或丢进暂存箱")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer()
+
+                    Button {
+                        isScriptImporterPresented = true
+                    } label: {
+                        Image(systemName: "square.and.arrow.down")
+                            .font(.system(size: 17, weight: .medium))
+                            .foregroundColor(.blue)
+                            .padding(6)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+                .padding(14)
+                .liquidGlass()
+
+                if scriptModel.scripts.isEmpty {
+                    HStack(spacing: 12) {
+                        Image(systemName: "doc.text")
+                            .font(.system(size: 18))
+                            .foregroundColor(.secondary)
+                        Text("脚本库是空的。点右上角下载按钮导入 .js / .pjs / .lua")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                    }
+                    .padding(16)
+                    .liquidGlass()
+                } else {
+                    ForEach(scriptModel.scripts) { script in
+                        scriptRow(script)
+                    }
+                }
+
+                if let warning = scriptModel.mixedWarning {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .foregroundColor(.orange)
+                        Text(warning)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                    }
+                    .padding(12)
+                    .liquidGlass()
+                }
+
+                Text("同一时间只能跑一种语言：JSC(.js) / PuerTS(.pjs) / Lua(.lua)。点选另一种会自动取消前一种。")
+                    .font(.caption2)
+                    .foregroundColor(.secondary.opacity(0.8))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 6)
+            }
+        }
+
+        private func scriptRow(_ script: PandoraScript) -> some View {
+            let isOn = scriptModel.selected.contains(script.name)
+            return HStack(spacing: 12) {
+                Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 22))
+                    .foregroundColor(isOn ? .blue : .secondary.opacity(0.5))
+
+                Image(systemName: "doc.plaintext.fill")
+                    .font(.system(size: 16))
+                    .foregroundColor(.orange)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(script.name)
+                        .font(.body)
+                        .fontWeight(.medium)
+                        .foregroundColor(.primary)
+                        .lineLimit(1)
+                    Text("\(script.langTitle) · \(script.sizeText) · \(script.langHint)")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Button {
+                    editorTarget = PandoraEditorTarget(name: script.name)
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundColor(.blue)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 8)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            .padding(14)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                scriptModel.toggle(script, bid: targetSelection.selectedApp?.bid)
+            }
+            .contextMenu {
+                Button {
+                    editorTarget = PandoraEditorTarget(name: script.name)
+                } label: {
+                    Label("编辑", systemImage: "pencil")
+                }
+                Button {
+                    PandoraScriptStore.shared.remove(script.name)
+                    scriptModel.reload(bid: targetSelection.selectedApp?.bid)
+                    ImportEngine.shared.log("🗑 已删除脚本：\(script.name)")
+                } label: {
+                    Label("删除", systemImage: "trash")
+                }
+            }
+            .liquidGlass()
         }
     }
 

@@ -27,3 +27,7 @@ DerivedData/
 # Temp
 *.tmp
 *.log
+
+# 脚本加载器 payload：由 PandoraLoader 工程编译产出，不进库。
+# 放进去之后 devkit/tipa.sh 会自动打进 Payload/TrollFools.app/。
+TrollFools/PandoraLoader.dylib

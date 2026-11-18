@@ -8,6 +8,15 @@
 
 三栏结构：**应用 / 注入 / 暂存箱**。
 
+## 脚本加载器（可选）
+
+注入页多了一块「脚本」：勾上 `.js` / `.pjs` / `.lua`，注入时会自动带上
+`PandoraLoader.dylib`，并把脚本写进目标沙盒的 `Documents/Pandora/scripts/`。
+之后改脚本只要重新部署一次，不用重新注入、不用重启游戏。
+
+需要先把编译好的 `PandoraLoader.dylib` 放进 `TrollFools/` 目录（`devkit/tipa.sh` 会自动打进包）。
+细节见 [PANDORA.md](PANDORA.md)。
+
 ## 磨砂玻璃怎么成立
 
 模糊只对「背后有明暗变化的像素」有效，背后是纯色面板时 `backdrop-filter` / `Material` 等于没开。
@@ -46,6 +55,7 @@ make package FINALPACKAGE=1
 | 路径 | 说明 |
 |---|---|
 | `TrollFools/TempHome.swift` | 主界面三个页面 + 磨砂玻璃组件 + 注入/暂存数据层 |
+| `TrollFools/PandoraLoader.swift` | 脚本仓库 / 绑定 / 沙盒部署 / 编辑器（见 PANDORA.md） |
 | `TrollFools/TrollFoolsApp.swift` | App 入口（跟随系统深浅色） |
 | `TrollFools/Execute.swift` | 进程枚举 / 精确杀进程（`KERN_PROCARGS2` 读 argv[0]，避开 `p_comm` 15 字节截断） |
 | `TrollFools/InjectorV3+*.swift` | 注入引擎：备份回滚、Mach-O 处理、持久化 |
