@@ -179,8 +179,8 @@
         NSData *data = PdHttpGet(PD_PORT, path, 1.2, &err);
         if (!data) {
             dispatch_async(dispatch_get_main_queue(), ^{
-                self_->syncing = NO;
-                if (!self_->runtime) self_->statusText = [NSString stringWithFormat:@"等容器 App（%@）", err ?: @"超时"];
+                self_.syncing = NO;
+                if (!self_.runtime) self_.statusText = [NSString stringWithFormat:@"等容器 App（%@）", err ?: @"超时"];
                 [self_ reportState:@"offline" msg:err ?: @"no-server"];
             });
             return;
@@ -190,17 +190,17 @@
         NSDictionary *man = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jerr];
         if (![man isKindOfClass:[NSDictionary class]]) {
             dispatch_async(dispatch_get_main_queue(), ^{
-                self_->syncing = NO;
+                self_.syncing = NO;
                 PdLog(@"[sync] manifest 解析失败: %@", jerr);
             });
             return;
         }
 
         NSString *ver = [NSString stringWithFormat:@"%@", man[@"ver"] ?: @"0"];
-        if (!force && [ver isEqualToString:knownVer] && self_->runtime) {
+        if (!force && [ver isEqualToString:knownVer] && self_.runtime) {
             dispatch_async(dispatch_get_main_queue(), ^{
-                self_->syncing = NO;
-                self_->statusText = [NSString stringWithFormat:@"已连接 · v%@", ver];
+                self_.syncing = NO;
+                self_.statusText = [NSString stringWithFormat:@"已连接 · v%@", ver];
                 [self_ reportState:@"ok" msg:@""];
             });
             return;
@@ -229,7 +229,7 @@
         }
 
         dispatch_async(dispatch_get_main_queue(), ^{
-            self_->syncing = NO;
+            self_.syncing = NO;
             if (!files) return;
             [self_ applyFiles:files version:ver];
         });
