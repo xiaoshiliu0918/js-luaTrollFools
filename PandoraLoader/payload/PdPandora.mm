@@ -180,6 +180,8 @@ static NSString *pd_pjs_prelude(NSString *logPath) {
 @property (nonatomic) void *env;          // Il2CppObject* JsEnv
 @property (nonatomic) void *envCls;
 @property (nonatomic) void *evalMethod;   // MethodInfo*
+@property (atomic) int generation;        // 加载代际：reload/unload 时 +1，
+                                          // 后台启动线程发现代数变了就自行退出
 @end
 
 @implementation PdPandoraRuntime
@@ -269,7 +271,44 @@ static NSString *pd_pjs_prelude(NSString *logPath) {
 }
 
 - (BOOL)loadFiles:(NSArray<PdScriptFile *> *)files error:(NSError **)error {
-    if (![self ensureEnvWithError:error]) return NO;
+    /* il2cpp domain 和 JsEnvManager 要等游戏真正跑起来才存在。
+       游戏刚启动时 ensureEnv 必然失败 —— 旧写法在这里同步试一次就放弃，
+       之后再也没有 js.log / [pjs] 日志（失败原因还是异步落盘，游戏被杀就丢），
+       表现就是 pandora.log 停在 [apply] 之后一片空白。
+       现在放后台线程轮询：5 秒一次、最多 150 秒，覆盖游戏加载全程，
+       每次尝试的原因都写进 pandora.log。 */
+    int gen = ++self.generation;
+    NSArray *snapshot = [files copy];
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        [self bootAndEval:snapshot generation:gen];
+    });
+    return YES;
+}
+
+/* 后台线程：等环境就绪，然后 prelude + 脚本。代数不匹配立即退出。 */
+- (void)bootAndEval:(NSArray<PdScriptFile *> *)files generation:(int)gen {
+    NSError *err = nil;
+    BOOL ok = NO;
+
+    for (int attempt = 1; attempt <= 30 && gen == self.generation; attempt++) {
+        err = nil;
+        if ([self ensureEnvWithError:&err]) { ok = YES; break; }
+        if (attempt == 1 || attempt % 6 == 0) {
+            PdLog(@"[pjs] 第 %d 次尝试还没就绪：%@", attempt, err.localizedDescription);
+        }
+        for (int i = 0; i < 50 && gen == self.generation; i++) {
+            [NSThread sleepForTimeInterval:0.1];   /* 5 秒，分段睡以便及时中断 */
+        }
+    }
+
+    if (gen != self.generation) return;            /* 期间被 reload/unload 打断 */
+    if (!ok) {
+        PdLog(@"[pjs] 150 秒内没挂上游戏的 JsEnv，放弃。最后原因：%@",
+              err.localizedDescription ?: @"未知");
+        return;
+    }
+
 
     NSString *logPath = [PdRootDir() stringByAppendingPathComponent:@"js.log"];
     [[NSFileManager defaultManager] createFileAtPath:logPath contents:nil attributes:nil];
@@ -277,13 +316,12 @@ static NSString *pd_pjs_prelude(NSString *logPath) {
     NSString *pre = pd_pjs_prelude(logPath);
     NSString *e = [self eval:pre chunk:@"__pandora_prelude"];
     if (e) {
-        if (error) *error = [NSError errorWithDomain:@"pandora" code:26 userInfo:@{
-            NSLocalizedDescriptionKey: [NSString stringWithFormat:@"前置脚本执行失败：%@", e]
-        }];
-        return NO;
+        PdLog(@"[pjs] 前置脚本执行失败：%@", e);
+        return;
     }
 
     for (PdScriptFile *f in files) {
+        if (gen != self.generation) return;
         NSString *src = [[NSString alloc] initWithData:f.data encoding:NSUTF8StringEncoding];
         if (!src) {
             PdLog(@"[pjs] %@ 不是合法 UTF-8，跳过", f.name);
@@ -294,11 +332,10 @@ static NSString *pd_pjs_prelude(NSString *logPath) {
             @"try{\n%@\n}catch(e){ console.error('[%@] ' + (e && e.stack ? e.stack : e)); }\n",
             src, f.name];
 
-        NSString *err = [self eval:wrapped chunk:f.name];
-        if (err) PdLog(@"[pjs] %@ 执行失败: %@", f.name, err);
-        else     PdLog(@"[pjs] %@ 已注入游戏 VM (%lu 字节)", f.name, (unsigned long)f.data.length);
+        NSString *err2 = [self eval:wrapped chunk:f.name];
+        if (err2) PdLog(@"[pjs] %@ 执行失败: %@", f.name, err2);
+        else      PdLog(@"[pjs] %@ 已注入游戏 VM (%lu 字节)", f.name, (unsigned long)f.data.length);
     }
-    return YES;
 }
 
 - (void)tickWithDelta:(double)dt {
@@ -306,6 +343,7 @@ static NSString *pd_pjs_prelude(NSString *logPath) {
 }
 
 - (void)unload {
+    self.generation++;   /* 通知后台启动线程立即停止 */
     if (!_evalMethod) return;
     [self eval:@"try{ if(typeof __pd_unload==='function') __pd_unload(); }catch(e){}" chunk:@"__pandora_unload"];
     _env = NULL;
