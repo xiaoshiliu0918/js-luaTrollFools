@@ -318,13 +318,23 @@ final class TempInjectManager {
         // 用 setPid 确认 posix_spawn 真的成功：旧实现是 fire-and-forget，
         // 失败时照样写 state.json，留下“注入了但没人还原”的会话。
         var spawnedPid: pid_t = 0
-        AuxiliaryExecute.spawn(
-            command: cliURL.path,
-            args: ["watch", bid],
-            setPid: { spawnedPid = $0 },
-            completionBlock: nil
-        )
-        guard spawnedPid > 1 else {
+        var spawnErr: NSString? = nil
+        let spawned = TFExecuteSafely({
+            AuxiliaryExecute.spawn(
+                command: cliURL.path,
+                args: ["watch", bid],
+                setPid: { spawnedPid = $0 },
+                completionBlock: nil
+            )
+        }, &spawnErr)
+        guard spawned, spawnedPid > 1 else {
+            if !spawned {
+                // ObjC 异常级别的失败必须以 throw 传达，外层 catch 才能记日志
+                throw NSError(
+                    domain: Constants.gErrorDomain, code: -3,
+                    userInfo: [NSLocalizedDescriptionKey: "看门狗进程启动异常：\(spawnErr ?? "未知")"]
+                )
+            }
             throw NSError(
                 domain: Constants.gErrorDomain, code: -2,
                 userInfo: [NSLocalizedDescriptionKey: NSLocalizedString("TempInjectCLIStartFailed", comment: "")]
@@ -352,7 +362,16 @@ final class TempInjectManager {
     /// Jump to the target app via SpringBoard.
     @discardableResult
     func launchApp(bid: String) -> Bool {
-        LSApplicationWorkspace.default().openApplication(withBundleID: bid)
+        // LSApplicationWorkspace 抛 ObjC 异常时 Swift 接不住，整个 App 闪退 ——
+        // 用 TFExecuteSafely 兜住，失败让用户手动打开游戏。
+        var err: NSString? = nil
+        let ok = TFExecuteSafely({
+            LSApplicationWorkspace.default().openApplication(withBundleID: bid)
+        }, &err)
+        if !ok {
+            ImportEngine.shared.log("⚠️ 跳转失败（\(err ?? "未知")），请手动打开游戏")
+        }
+        return ok
     }
 
     /// On app start: restore orphan sessions whose watchdog has died,
@@ -417,11 +436,21 @@ final class TempInjectManager {
                 continue
             }
 
-            let receipt = AuxiliaryExecute.spawn(
-                command: cliURL.path,
-                args: ["watch", bid, "--timeout", "0"],
-                timeout: 300
-            )
+            var receipt: AuxiliaryExecute.ExecuteReceipt?
+            var restoreErr: NSString? = nil
+            // 自动还原跑在 App 启动路径上 —— 这里抛 ObjC 异常就是
+            // “每次打开 App 几秒后闪退”的直接原因，必须兜住。
+            let spawnedRestore = TFExecuteSafely({
+                receipt = AuxiliaryExecute.spawn(
+                    command: cliURL.path,
+                    args: ["watch", bid, "--timeout", "0"],
+                    timeout: 300
+                )
+            }, &restoreErr)
+            guard spawnedRestore, let receipt else {
+                ImportEngine.shared.log("⚠️ 还原 \(bid) 时异常：\(restoreErr ?? "未知")（已保留状态，下次再试）")
+                continue
+            }
 
             // 只有确认还原成功才删状态。旧实现无论成败都删，
             // 一旦这次 eject 失败（插件已被系统清掉、Mach-O 被别的工具改过），

@@ -158,6 +158,24 @@ static NSString *TFGetCurrentProjectVersion(void) {
     return @CURRENT_PROJECT_VERSION;
 }
 
+/// Swift 的 do-catch 接不住 Objective-C 异常（@throw 直接整个进程崩）。
+/// 私有 API（LSApplicationWorkspace、LauncherServices 等）在系统版本间
+/// 行为不稳，抛异常就表现为“App 启动几秒后闪退”。所有跨过这条边界的
+/// 调用都包一层。
+BOOL TFExecuteSafely(void (^block)(void), NSString * __autoreleasing _Nullable * _Nullable outError) {
+    @try {
+        block();
+        return YES;
+    } @catch (NSException *exception) {
+        if (outError) {
+            *outError = [NSString stringWithFormat:@"%@: %@",
+                         exception.name ?: @"NSException",
+                         exception.reason ?: @"(no reason)"];
+        }
+        return NO;
+    }
+}
+
 NSString *TFGetDisplayVersion(void) {
     static NSString *displayVersion = nil;
     static dispatch_once_t onceToken;
